@@ -1,0 +1,72 @@
+# ============================================================================
+# ubuntu-home-server - one compose stack for all applications.
+# Copy this file to docker-compose.yml (setup-server.sh does it). The local
+# docker-compose.yml is gitignored, so local edits stay local.
+#
+# No service publishes ports on the host. Public traffic enters through
+# Cloudflare Tunnel (cloudflared). Private access (SSH, admin) goes through
+# Tailscale on the host.
+#
+# Application services are NOT written here by hand. deploy.sh generates them
+# from homeserver.env manifests into docker-compose.override.yml (see README).
+# ============================================================================
+
+name: homeserver
+
+# Log rotation for ALL services. Without this, container logs grow forever.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+networks:
+  internal:
+    driver: bridge
+
+services:
+
+  # ---------- Cloudflare Tunnel (public entry point) ----------
+  # One tunnel serves all applications (routing set in Cloudflare dashboard
+  # or automatically by deploy when CF_* variables are set).
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    logging: *default-logging
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?Set TUNNEL_TOKEN in .env (see .env.example)}
+    networks:
+      - internal
+
+  # ---------- Optional local PostgreSQL (disabled by default) ----------
+  # Uncomment this service and the `volumes:` block at the bottom to run one
+  # shared Postgres on this server. Deploy does NOT create databases and does
+  # NOT inject DATABASE_URL. For each application:
+  #   1. docker compose up -d db
+  #   2. docker compose exec db createdb -U postgres <app_db_name>
+  #   3. Set DATABASE_URL explicitly in env/<app>.env, for example:
+  #      DATABASE_URL=postgresql://postgres:<DB_PASSWORD>@db:5432/<app_db_name>
+  # Existing installations: keep project name `homeserver` and volume key
+  # `pgdata` unchanged, and the existing homeserver_pgdata volume reattaches
+  # with all current databases. Keep DB_PASSWORD unchanged.
+  # db:
+  #   image: postgres:16-alpine
+  #   restart: unless-stopped
+  #   logging: *default-logging
+  #   environment:
+  #     POSTGRES_USER: postgres
+  #     POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env (see .env.example)}
+  #     POSTGRES_DB: postgres
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #   networks:
+  #     - internal
+
+# volumes:
+#   pgdata:

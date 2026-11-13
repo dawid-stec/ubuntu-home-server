@@ -151,6 +151,29 @@ class GenerateComposeTest(unittest.TestCase):
         self.assertIsNone(app)
         self.assertTrue(errors)
 
+    def test_json_array_origins_allowed(self):
+        for value in (
+            '\'["https://a.example.com","https://b.example.com"]\'',
+            '["https://a.example.com","https://b.example.com"]',
+        ):
+            with tempfile.NamedTemporaryFile(
+                "w", suffix=".env", delete=False, encoding="utf-8"
+            ) as f:
+                f.write(f"ALLOWED_ORIGINS={value}\n")
+                name = f.name
+            values, errors = gen.parse_env_file(Path(name))
+            self.assertEqual(errors, [])
+            self.assertEqual(values["ALLOWED_ORIGINS"], value)
+
+    def test_json_array_with_shell_metachars_rejected(self):
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".env", delete=False, encoding="utf-8"
+        ) as f:
+            f.write('ALLOWED_ORIGINS=\'["https://a.example.com;rm"]\'\n')
+            name = f.name
+        _, errors = gen.parse_env_file(Path(name))
+        self.assertTrue(errors)
+
     def test_explicit_cors_wins_over_derived(self):
         app, errors, _ = self.build(
             server_env=SERVER_ENV + "CORS_ORIGINS=https://only.example.com\n"

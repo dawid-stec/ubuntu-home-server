@@ -36,6 +36,26 @@ NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 ENV_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 
+def _is_safe_json_string_array(value):
+    """True only for a JSON array of strings, e.g. '["https://a.com"]'.
+
+    Needed by apps that require JSON (ALLOWED_ORIGINS). Spaces are allowed
+    only inside single quotes; shell metachars inside items stay forbidden.
+    """
+    quoted = len(value) >= 2 and value[0] == "'" and value[-1] == "'"
+    if (" " in value or "\t" in value) and not quoted:
+        return False
+    try:
+        parsed = json.loads(value[1:-1] if quoted else value)
+    except ValueError:
+        return False
+    return isinstance(parsed, list) and all(
+        isinstance(item, str)
+        and not any(c in item for c in (" ", "\t", '"', "'", "`", "$", ";"))
+        for item in parsed
+    )
+
+
 def parse_env_file(path):
     """Parse KEY=VALUE. Return (dict, error list). Never executes code."""
     values, errors = {}, []
@@ -51,7 +71,9 @@ def parse_env_file(path):
         if not ENV_KEY_RE.match(key):
             errors.append(f"{path}:{lineno}: invalid variable name: {key!r}")
             continue
-        if any(c in value for c in (" ", "\t", '"', "'", "`", "$", ";")):
+        if not _is_safe_json_string_array(value) and any(
+            c in value for c in (" ", "\t", '"', "'", "`", "$", ";")
+        ):
             errors.append(f"{path}:{lineno}: forbidden character in value of {key}")
             continue
         values[key] = value

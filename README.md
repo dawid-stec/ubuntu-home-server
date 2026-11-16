@@ -24,7 +24,8 @@ Default stack is only `cloudflared` plus your applications. No database runs unl
 | [scripts/deploy.sh](scripts/deploy.sh) | Fetches app code, generates services, builds and starts the stack |
 | [scripts/generate_compose.py](scripts/generate_compose.py) | Generates app services from `homeserver.env` manifests |
 | [scripts/cloudflare_sync.py](scripts/cloudflare_sync.py) | Sets tunnel Public Hostnames via the Cloudflare API |
-| [scripts/backup.sh](scripts/backup.sh) | Daily dump of the optional local Postgres to `backups/` (cron, 14-day retention, no-op without a local DB) |
+| [scripts/backup.sh](scripts/backup.sh) | Dump of the optional local Postgres to `backups/` every 6 h (cron, 30-day retention, optional R2 upload, no-op without a local DB) |
+| [scripts/install-cron.sh](scripts/install-cron.sh) | Sets the backup cron schedule, replacing any old entry (run by setup and deploy; change the schedule only here) |
 | [examples/](examples) | Example application manifest to copy into an app repo |
 | [manifests/](manifests) | Fallback manifests for apps without their own `homeserver.env` |
 | `repos/` | Cloned application repositories land here (gitignored) |
@@ -66,7 +67,7 @@ The script is idempotent. Run it as many times as needed. It:
 5. **Blocks sleep**, so a laptop with a closed lid keeps serving.
 6. Creates **`.env`** with a random database password (app secrets come later, in `env/<app>.env`).
 7. Creates **`docker-compose.yml`** from docker-compose.example.yml if missing. Local file is gitignored, so enabling optional database or other local edits never dirty repo.
-8. Sets a **daily backup cron** (03:30). It only does work when the optional local Postgres is enabled.
+8. Sets a **backup cron every 6 hours** (03:30, 09:30, 15:30, 21:30). It only does work when the optional local Postgres is enabled.
 
 **If setup added you to the docker group, log out and back in.** Otherwise `docker` needs `sudo`.
 
@@ -202,7 +203,7 @@ No data loss. The databases already live in the `homeserver_pgdata` volume:
 
 ## Backups
 
-- With the local Postgres enabled, cron dumps the **whole Postgres** (all databases) daily at 03:30 to `backups/` (gzip, 14-day retention). Log: `backups/backup.log`.
+- With the local Postgres enabled, cron dumps the **whole Postgres** (all databases) every 6 hours (03:30, 09:30, 15:30, 21:30) to `backups/` (gzip, 30-day retention). Log: `backups/backup.log`.
 - Without a local database, the backup script prints a skip message and exits cleanly.
 - Manual run: `bash scripts/backup.sh`.
 - Restore:
@@ -211,7 +212,19 @@ No data loss. The databases already live in the `homeserver_pgdata` volume:
   gunzip -c backups/pg-all-YYYYMMDD-HHMM.sql.gz | docker compose exec -T db psql -U postgres -d postgres
   ```
 
-- Backups sit on the same disk as the database. Copy `backups/` elsewhere from time to time (for example `scp` over Tailscale).
+- Local backups sit on the same disk as the database. For an off-site copy, enable **Cloudflare R2** (free tier: 10 GB):
+  1. Cloudflare dashboard -> **R2** -> **Create bucket** (for example `homeserver-backups`).
+  2. **R2 -> Manage API tokens -> Create API token**: permission **Object Read & Write**, scoped to that bucket. Copy the Access Key ID and Secret Access Key.
+  3. In `.env` set `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (account ID defaults to `CF_ACCOUNT_ID`), and `BACKUP_ENCRYPTION_PASSPHRASE` (`openssl rand -base64 32`; keep a copy in a password manager).
+  4. Test: `bash scripts/backup.sh`. The log shows `R2 upload OK`.
+
+  Each dump is uploaded to `<bucket>/postgres/` (GPG-encrypted when a passphrase is set) by the `rclone/rclone` Docker image; remote copies older than `R2_RETENTION_DAYS` (default 30) are deleted. A failed upload keeps the local backup and makes the script exit non-zero.
+
+  Restore from R2 (download from the dashboard, or with rclone), then:
+
+  ```bash
+  gpg --decrypt pg-all-YYYYMMDD-HHMMSS.sql.gz.gpg | gunzip | docker compose exec -T db psql -U postgres -d postgres
+  ```
 
 Open a shell in the local database:
 

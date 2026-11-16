@@ -42,6 +42,10 @@ set -a; . ./.env; set +a
 
 : "${APP_REPOS:?Set APP_REPOS in .env (see .env.example)}"
 
+# Keep the backup cron in sync with the schedule in install-cron.sh
+# (replaces an old entry). A failure here must not block the deploy.
+bash scripts/install-cron.sh || echo "    WARNING: could not update backup cron (see scripts/install-cron.sh)."
+
 compose() { docker compose "$@"; }  # docker-compose.override.yml loads automatically
 
 manifest_service() {  # $1 = repo directory; prints SERVICE from manifest (or nothing)

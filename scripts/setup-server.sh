@@ -115,17 +115,11 @@ fi
 # ---------- 8. Working directories ----------
 mkdir -p repos backups env
 
-# ---------- 9. Cron: daily database backup at 03:30 ----------
+# ---------- 9. Cron: database backup every 6 h (03:30, 09:30, 15:30, 21:30) ----------
 # No-op unless the optional local Postgres is enabled (see backup.sh).
-CRON_LINE="30 3 * * * $REPO_DIR/scripts/backup.sh >> $REPO_DIR/backups/backup.log 2>&1"
-if crontab -l 2>/dev/null | grep -qF "scripts/backup.sh"; then
-  ok "Backup cron already set"
-else
-  ( crontab -l 2>/dev/null || true; echo "$CRON_LINE" ) | crontab -
-  ok "Added cron: backup daily at 03:30 (only when local Postgres is enabled)"
-fi
-
+# install-cron.sh replaces any old backup entry, so re-running is safe.
 chmod +x scripts/*.sh
+ok "$(bash scripts/install-cron.sh)"
 
 # ---------- Done ----------
 info "SETUP FINISHED"
